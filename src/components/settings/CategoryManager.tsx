@@ -12,6 +12,7 @@ const palette = ['#f97066', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981
 export function CategoryManager() {
   const [type, setType] = useState<TransactionType>('expense')
   const [name, setName] = useState('')
+  const [error, setError] = useState<string | null>(null)
   const categories = useLiveQuery(() => db.categories.where('type').equals(type).toArray(), [type])
 
   async function addCategory() {
@@ -26,7 +27,8 @@ export function CategoryManager() {
     if (id === undefined) return
     const inUse = await db.transactions.where('categoryId').equals(id).count()
     if (inUse > 0) {
-      alert('Nie można usunąć kategorii, która ma przypisane transakcje.')
+      setError('Nie można usunąć kategorii, która ma przypisane transakcje.')
+      setTimeout(() => setError(null), 4000)
       return
     }
     await db.categories.delete(id)
@@ -88,6 +90,7 @@ export function CategoryManager() {
           )
         })}
       </div>
+      {error && <p className="mt-3 text-xs text-red-500">{error}</p>}
     </GlassCard>
   )
 }

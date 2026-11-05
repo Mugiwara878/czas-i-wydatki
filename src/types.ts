@@ -15,6 +15,14 @@ export interface Transaction {
   categoryId: number
   note: string
   date: string // ISO date, yyyy-MM-dd
+  importBatchId?: number
+}
+
+export interface ImportBatch {
+  id?: number
+  source: string
+  count: number
+  createdAt: string // ISO timestamp
 }
 
 export interface Budget {

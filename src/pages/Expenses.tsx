@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { addMonths, endOfMonth, format, startOfMonth } from 'date-fns'
 import { pl } from 'date-fns/locale'
-import { ChevronLeft, ChevronRight, Plus } from 'lucide-react'
+import { CheckSquare, ChevronLeft, ChevronRight, Plus, Square, Trash2, X } from 'lucide-react'
+import clsx from 'clsx'
 import { db } from '../db/db'
 import { GlassCard } from '../components/ui/GlassCard'
 import { Button } from '../components/ui/Button'
@@ -16,6 +17,9 @@ export function Expenses() {
   const [cursor, setCursor] = useState(new Date())
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<Transaction | null>(null)
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const monthStart = useMemo(() => format(startOfMonth(cursor), 'yyyy-MM-dd'), [cursor])
   const monthEnd = useMemo(() => format(endOfMonth(cursor), 'yyyy-MM-dd'), [cursor])
@@ -49,17 +53,57 @@ export function Expenses() {
   }
 
   function openEdit(t: Transaction) {
+    if (selectMode) {
+      toggleSelected(t.id)
+      return
+    }
     setEditing(t)
     setModalOpen(true)
+  }
+
+  function toggleSelected(id: number | undefined) {
+    if (id === undefined) return
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectMode() {
+    setSelectMode((s) => !s)
+    setSelectedIds(new Set())
+    setConfirmingDelete(false)
+  }
+
+  function selectAll() {
+    setSelectedIds(new Set((transactions ?? []).map((t) => t.id!).filter((id) => id !== undefined)))
+  }
+
+  async function handleDeleteSelected() {
+    if (selectedIds.size === 0) return
+    await db.transactions.bulkDelete([...selectedIds])
+    setSelectedIds(new Set())
+    setSelectMode(false)
+    setConfirmingDelete(false)
   }
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold tracking-tight">Wydatki</h1>
-        <Button onClick={openNew}>
-          <Plus size={16} /> Dodaj
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="ghost" onClick={toggleSelectMode}>
+            {selectMode ? <X size={16} /> : <CheckSquare size={16} />}
+            {selectMode ? 'Anuluj' : 'Zaznacz'}
+          </Button>
+          {!selectMode && (
+            <Button onClick={openNew}>
+              <Plus size={16} /> Dodaj
+            </Button>
+          )}
+        </div>
       </div>
 
       <GlassCard className="flex items-center justify-between px-4 py-3">
@@ -78,6 +122,39 @@ export function Expenses() {
         </button>
       </GlassCard>
 
+      {selectMode && (
+        <GlassCard className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+          <button
+            onClick={selectAll}
+            className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
+          >
+            Zaznacz wszystkie ({transactions?.length ?? 0})
+          </button>
+          {confirmingDelete ? (
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-slate-500 dark:text-slate-400">Na pewno?</span>
+              <Button variant="danger" onClick={handleDeleteSelected}>
+                Tak, usuń ({selectedIds.size})
+              </Button>
+              <button
+                onClick={() => setConfirmingDelete(false)}
+                className="text-slate-400 hover:underline"
+              >
+                Nie
+              </button>
+            </div>
+          ) : (
+            <Button
+              variant="danger"
+              disabled={selectedIds.size === 0}
+              onClick={() => setConfirmingDelete(true)}
+            >
+              <Trash2 size={16} /> Usuń zaznaczone ({selectedIds.size})
+            </Button>
+          )}
+        </GlassCard>
+      )}
+
       {grouped.length === 0 && (
         <GlassCard className="p-8 text-center text-sm text-slate-500 dark:text-slate-400">
           Brak transakcji w tym miesiącu.
@@ -95,12 +172,22 @@ export function Expenses() {
                 const category = categoryMap.get(t.categoryId)
                 if (!category) return null
                 const Icon = resolveIcon(category.icon)
+                const selected = t.id !== undefined && selectedIds.has(t.id)
                 return (
                   <button
                     key={t.id}
                     onClick={() => openEdit(t)}
-                    className="flex w-full items-center gap-3 px-4 py-3 text-left first:rounded-t-3xl last:rounded-b-3xl hover:bg-white/40 dark:hover:bg-white/5"
+                    className={clsx(
+                      'flex w-full items-center gap-3 px-4 py-3 text-left first:rounded-t-3xl last:rounded-b-3xl hover:bg-white/40 dark:hover:bg-white/5',
+                      selected && 'bg-brand-500/10',
+                    )}
                   >
+                    {selectMode &&
+                      (selected ? (
+                        <CheckSquare size={20} className="shrink-0 text-brand-500" />
+                      ) : (
+                        <Square size={20} className="shrink-0 text-slate-400" />
+                      ))}
                     <IconChip icon={Icon} color={category.color} size="sm" />
                     <div className="flex-1 min-w-0">
                       <p className="truncate text-sm font-medium">{category.name}</p>

@@ -6,7 +6,7 @@ import { db } from '../../db/db'
 import type { TransactionType } from '../../types'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
-import { decodeFile, detectDelimiter, guessCategoryName, parseAmount, parseCsv, parseDate } from '../../lib/csv'
+import { cleanDescription, decodeFile, guessCategoryName, parseAmount, parseCsv, parseDate } from '../../lib/csv'
 import { formatCurrency } from '../../lib/format'
 
 interface DraftRow {
@@ -71,8 +71,7 @@ export function ImportCsvModal({
     setError(null)
     try {
       const text = await decodeFile(file, encoding)
-      const delimiter = detectDelimiter(text.split(/\r\n|\r|\n/)[0] ?? '')
-      const { headers: h, rows } = parseCsv(text, delimiter)
+      const { headers: h, rows } = parseCsv(text)
       if (h.length === 0 || rows.length === 0) {
         setError('Nie udało się odczytać żadnych wierszy z pliku.')
         return
@@ -81,7 +80,7 @@ export function ImportCsvModal({
       setRawRows(rows)
       setDateCol(guessColumn(h, ['data księgowania', 'data operacji', 'data transakcji', 'data']))
       setAmountCol(guessColumn(h, ['kwota transakcji', 'kwota operacji', 'kwota', 'amount']))
-      setDescCol(guessColumn(h, ['opis operacji', 'tytuł', 'nazwa kontrahenta', 'opis', 'szczegóły', 'description']))
+      setDescCol(guessColumn(h, ['tytuł', 'tytul', 'nazwa kontrahenta', 'opis operacji', 'opis', 'szczegóły', 'description']))
       setStep(2)
     } catch {
       setError('Nie udało się odczytać pliku. Spróbuj zmienić kodowanie.')
@@ -103,7 +102,7 @@ export function ImportCsvModal({
     for (const row of rawRows) {
       const rawDate = row[dateIdx] ?? ''
       const rawAmount = row[amountIdx] ?? ''
-      const description = (row[descIdx] ?? '').slice(0, 200)
+      const description = cleanDescription(row[descIdx] ?? '').slice(0, 200)
 
       const date = parseDate(rawDate)
       const amount = parseAmount(rawAmount)
@@ -140,6 +139,11 @@ export function ImportCsvModal({
   async function handleImport() {
     const toImport = draftRows.filter((r) => r.include)
     if (toImport.length === 0) return
+    const batchId = await db.importBatches.add({
+      source: file?.name ?? 'wyciąg.csv',
+      count: toImport.length,
+      createdAt: new Date().toISOString(),
+    })
     await db.transactions.bulkAdd(
       toImport.map((r) => ({
         type: r.type,
@@ -147,6 +151,7 @@ export function ImportCsvModal({
         categoryId: r.categoryId,
         date: r.date,
         note: r.description,
+        importBatchId: batchId,
       })),
     )
     onImported(toImport.length)
@@ -228,9 +233,9 @@ export function ImportCsvModal({
                 onChange={(e) => set(e.target.value)}
                 className="w-full rounded-2xl border border-white/60 bg-white/70 px-4 py-2.5 text-sm outline-none focus:border-brand-400 dark:border-white/10 dark:bg-white/5"
               >
-                {headers.map((h) => (
-                  <option key={h} value={h}>
-                    {h}
+                {headers.map((h, i) => (
+                  <option key={`${h}-${i}`} value={h}>
+                    {h || '(bez nazwy)'}
                   </option>
                 ))}
               </select>
@@ -242,7 +247,7 @@ export function ImportCsvModal({
               <p className="mb-1 font-semibold text-slate-500 dark:text-slate-400">Podgląd pierwszego wiersza:</p>
               <p>Data: {rawRows[0][headers.indexOf(dateCol)]}</p>
               <p>Kwota: {rawRows[0][headers.indexOf(amountCol)]}</p>
-              <p>Opis: {rawRows[0][headers.indexOf(descCol)]}</p>
+              <p>Opis: {cleanDescription(rawRows[0][headers.indexOf(descCol)] ?? '')}</p>
             </div>
           )}
 

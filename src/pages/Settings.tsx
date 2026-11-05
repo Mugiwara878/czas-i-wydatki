@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
-import { Moon, Sun, Monitor, Download, Upload, AlertTriangle, Landmark } from 'lucide-react'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { Moon, Sun, Monitor, Download, Upload, AlertTriangle, Landmark, Undo2 } from 'lucide-react'
 import clsx from 'clsx'
 import { db } from '../db/db'
 import { GlassCard } from '../components/ui/GlassCard'
@@ -7,6 +8,7 @@ import { Button } from '../components/ui/Button'
 import { CategoryManager } from '../components/settings/CategoryManager'
 import { ImportCsvModal } from '../components/settings/ImportCsvModal'
 import { getStoredTheme, setTheme, type Theme } from '../lib/theme'
+import { relativeTime } from '../lib/format'
 
 const themeOptions: { value: Theme; label: string; icon: typeof Sun }[] = [
   { value: 'light', label: 'Jasny', icon: Sun },
@@ -18,10 +20,27 @@ export function Settings() {
   const [theme, setThemeState] = useState<Theme>(getStoredTheme())
   const [status, setStatus] = useState<string | null>(null)
   const [csvModalOpen, setCsvModalOpen] = useState(false)
+  const [confirmingBatch, setConfirmingBatch] = useState<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const recentBatches = useLiveQuery(
+    () => db.importBatches.orderBy('createdAt').reverse().limit(5).toArray(),
+    [],
+  )
 
   function handleCsvImported(count: number) {
     setStatus(`Zaimportowano ${count} transakcji z wyciągu bankowego.`)
+    setTimeout(() => setStatus(null), 4000)
+  }
+
+  async function handleUndoImport(batchId: number | undefined) {
+    if (batchId === undefined) return
+    await db.transaction('rw', db.transactions, db.importBatches, async () => {
+      await db.transactions.where('importBatchId').equals(batchId).delete()
+      await db.importBatches.delete(batchId)
+    })
+    setConfirmingBatch(null)
+    setStatus('Import cofnięty.')
     setTimeout(() => setStatus(null), 4000)
   }
 
@@ -102,6 +121,51 @@ export function Settings() {
         <Button variant="ghost" onClick={() => setCsvModalOpen(true)}>
           <Landmark size={16} /> Importuj wyciąg bankowy (CSV)
         </Button>
+
+        {recentBatches && recentBatches.length > 0 && (
+          <div className="mt-4 space-y-1 border-t border-slate-900/5 pt-4 dark:border-white/10">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Ostatnie importy
+            </p>
+            {recentBatches.map((batch) => (
+              <div
+                key={batch.id}
+                className="flex items-center gap-3 rounded-2xl px-2 py-2 hover:bg-white/40 dark:hover:bg-white/5"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{batch.source}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {batch.count} transakcji &middot; {relativeTime(batch.createdAt)}
+                  </p>
+                </div>
+                {confirmingBatch === batch.id ? (
+                  <div className="flex shrink-0 items-center gap-2 text-xs">
+                    <span className="text-slate-500 dark:text-slate-400">Na pewno?</span>
+                    <button
+                      onClick={() => handleUndoImport(batch.id)}
+                      className="font-semibold text-red-500 hover:underline"
+                    >
+                      Tak
+                    </button>
+                    <button
+                      onClick={() => setConfirmingBatch(null)}
+                      className="text-slate-400 hover:underline"
+                    >
+                      Nie
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmingBatch(batch.id ?? null)}
+                    className="flex shrink-0 items-center gap-1 rounded-xl px-2 py-1.5 text-xs font-medium text-red-500 hover:bg-red-500/10"
+                  >
+                    <Undo2 size={14} /> Cofnij
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </GlassCard>
 
       <GlassCard className="p-5">

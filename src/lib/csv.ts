@@ -17,46 +17,74 @@ export function detectDelimiter(firstLine: string): string {
   return best
 }
 
+function parseLineWith(line: string, delim: string): string[] {
+  const cells: string[] = []
+  let current = ''
+  let inQuotes = false
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i]
+    if (inQuotes) {
+      if (char === '"') {
+        if (line[i + 1] === '"') {
+          current += '"'
+          i++
+        } else {
+          inQuotes = false
+        }
+      } else {
+        current += char
+      }
+    } else if (char === '"') {
+      inQuotes = true
+    } else if (char === delim) {
+      cells.push(current.trim())
+      current = ''
+    } else {
+      current += char
+    }
+  }
+  cells.push(current.trim())
+  return cells
+}
+
+const headerDateHints = ['data', 'date']
+const headerAmountHints = ['kwota', 'amount', 'suma']
+
+/**
+ * Polish bank CSV exports (mBank, PKO, ING, ...) often prepend dozens of
+ * metadata lines (account holder, account number, period, balance summary)
+ * before the real transaction table. Scan for the line that actually looks
+ * like a transaction header (has both a date-ish and an amount-ish column)
+ * instead of assuming row 0 is the header.
+ */
+function findHeaderRow(lines: string[]): { index: number; delimiter: string } {
+  for (let i = 0; i < lines.length; i++) {
+    const delim = detectDelimiter(lines[i])
+    const cells = lines[i]
+      .split(delim)
+      .map((c) => c.replace(/^#+/, '').trim().toLowerCase())
+    const hasDate = cells.some((c) => headerDateHints.some((k) => c.includes(k)))
+    const hasAmount = cells.some((c) => headerAmountHints.some((k) => c.includes(k)))
+    if (hasDate && hasAmount && cells.length >= 3) {
+      return { index: i, delimiter: delim }
+    }
+  }
+  return { index: 0, delimiter: detectDelimiter(lines[0] ?? '') }
+}
+
 export function parseCsv(text: string, delimiter?: string): ParsedCsv {
   const cleanText = text.replace(/^﻿/, '').trim()
   const lines = cleanText.split(/\r\n|\r|\n/).filter((l) => l.length > 0)
   if (lines.length === 0) return { headers: [], rows: [] }
 
-  const delim = delimiter ?? detectDelimiter(lines[0])
+  const { index: headerIndex, delimiter: detectedDelimiter } = findHeaderRow(lines)
+  const delim = delimiter ?? detectedDelimiter
 
-  function parseLine(line: string): string[] {
-    const cells: string[] = []
-    let current = ''
-    let inQuotes = false
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i]
-      if (inQuotes) {
-        if (char === '"') {
-          if (line[i + 1] === '"') {
-            current += '"'
-            i++
-          } else {
-            inQuotes = false
-          }
-        } else {
-          current += char
-        }
-      } else if (char === '"') {
-        inQuotes = true
-      } else if (char === delim) {
-        cells.push(current.trim())
-        current = ''
-      } else {
-        current += char
-      }
-    }
-    cells.push(current.trim())
-    return cells
-  }
-
-  const [headerLine, ...rowLines] = lines
-  const headers = parseLine(headerLine)
-  const rows = rowLines.map(parseLine).filter((r) => r.some((cell) => cell !== ''))
+  const headers = parseLineWith(lines[headerIndex], delim).map((h) => h.replace(/^#+/, '').trim())
+  const rows = lines
+    .slice(headerIndex + 1)
+    .map((l) => parseLineWith(l, delim))
+    .filter((r) => r.some((cell) => cell !== ''))
 
   return { headers, rows }
 }
@@ -98,6 +126,13 @@ export function parseDate(value: string): string | null {
   }
 
   return null
+}
+
+export function cleanDescription(value: string): string {
+  return value
+    .replace(/DATA TRANSAKCJI:.*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 export function parseAmount(value: string): number | null {

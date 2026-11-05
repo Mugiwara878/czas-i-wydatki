@@ -8,23 +8,12 @@ import { Button } from '../components/ui/Button'
 import { ColorPicker } from '../components/ui/ColorPicker'
 import { DrawingCanvas, type DrawingCanvasHandle } from '../components/ideas/DrawingCanvas'
 import { DEFAULT_TASK_COLOR } from '../lib/color'
+import { relativeTime } from '../lib/format'
 import type { Idea } from '../types'
 
 const colorPresets = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#64748b']
 const inkColors = ['#1e293b', '#ef4444', '#2563eb', '#16a34a', '#f59e0b']
 const brushSizes = [3, 6, 10]
-
-function relativeTime(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime()
-  const minutes = Math.round(diffMs / 60000)
-  if (minutes < 1) return 'przed chwilą'
-  if (minutes < 60) return `${minutes} min temu`
-  const hours = Math.round(minutes / 60)
-  if (hours < 24) return `${hours} godz. temu`
-  const days = Math.round(hours / 24)
-  if (days < 7) return `${days} dni temu`
-  return new Date(iso).toLocaleDateString('pl-PL')
-}
 
 export function Ideas() {
   const ideas = useLiveQuery(() => db.ideas.orderBy('updatedAt').reverse().toArray(), [])

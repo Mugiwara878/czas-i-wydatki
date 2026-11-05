@@ -1,12 +1,13 @@
 import { useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { endOfMonth, format, startOfMonth } from 'date-fns'
+import { endOfMonth, format, startOfMonth, subMonths } from 'date-fns'
+import { pl } from 'date-fns/locale'
 import { Wallet, TrendingDown, TrendingUp, CheckCircle2, Circle } from 'lucide-react'
 import { db } from '../db/db'
 import { StatCard } from '../components/ui/StatCard'
 import { GlassCard } from '../components/ui/GlassCard'
-import { IconChip } from '../components/ui/IconChip'
-import { resolveIcon } from '../lib/icons'
+import { MonthlyTrendChart } from '../components/dashboard/MonthlyTrendChart'
+import { CategoryDonutChart } from '../components/dashboard/CategoryDonutChart'
 import { currentMonthLabel, formatCurrency, todayIso } from '../lib/format'
 
 export function Dashboard() {
@@ -27,21 +28,43 @@ export function Dashboard() {
 
   const categoryMap = new Map(categories?.map((c) => [c.id, c]))
 
-  const topCategories = useMemo(() => {
+  const categoryBreakdown = useMemo(() => {
     if (!transactions) return []
     const totals = new Map<number, number>()
     for (const t of transactions) {
       if (t.type !== 'expense') continue
       totals.set(t.categoryId, (totals.get(t.categoryId) ?? 0) + t.amount)
     }
-    return [...totals.entries()]
+    const sorted = [...totals.entries()]
       .map(([categoryId, total]) => ({ category: categoryMap.get(categoryId), total }))
-      .filter((x) => x.category)
+      .filter((x): x is { category: NonNullable<typeof x.category>; total: number } => !!x.category)
       .sort((a, b) => b.total - a.total)
-      .slice(0, 5)
+
+    const top = sorted.slice(0, 5).map((x) => ({ name: x.category.name, value: x.total, color: x.category.color }))
+    const restTotal = sorted.slice(5).reduce((sum, x) => sum + x.total, 0)
+    if (restTotal > 0) top.push({ name: 'Inne', value: restTotal, color: '#94a3b8' })
+    return top
   }, [transactions, categories])
 
-  const maxCategoryTotal = topCategories[0]?.total ?? 1
+  const trendStart = useMemo(() => format(startOfMonth(subMonths(new Date(), 5)), 'yyyy-MM-dd'), [])
+  const trendTransactions = useLiveQuery(
+    () => db.transactions.where('date').between(trendStart, monthEnd, true, true).toArray(),
+    [trendStart, monthEnd],
+  )
+
+  const trendData = useMemo(() => {
+    const buckets = Array.from({ length: 6 }, (_, i) => {
+      const d = subMonths(new Date(), 5 - i)
+      return { key: format(d, 'yyyy-MM'), label: format(d, 'LLL', { locale: pl }), income: 0, expense: 0 }
+    })
+    for (const t of trendTransactions ?? []) {
+      const bucket = buckets.find((b) => b.key === t.date.slice(0, 7))
+      if (!bucket) continue
+      if (t.type === 'income') bucket.income += t.amount
+      else bucket.expense += t.amount
+    }
+    return buckets
+  }, [trendTransactions])
 
   async function toggleTask(id: number | undefined, done: boolean) {
     if (id === undefined) return
@@ -76,37 +99,15 @@ export function Dashboard() {
         />
       </div>
 
+      <GlassCard className="p-5">
+        <h2 className="mb-4 text-base font-semibold">Przychody i wydatki &middot; ostatnie 6 miesięcy</h2>
+        <MonthlyTrendChart data={trendData} />
+      </GlassCard>
+
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <GlassCard className="p-5">
-          <h2 className="mb-4 text-base font-semibold">Najwięcej wydajesz na</h2>
-          {topCategories.length === 0 && (
-            <p className="text-sm text-slate-500 dark:text-slate-400">Brak wydatków w tym miesiącu.</p>
-          )}
-          <div className="space-y-3">
-            {topCategories.map(({ category, total }) => {
-              const Icon = resolveIcon(category!.icon)
-              return (
-                <div key={category!.id} className="flex items-center gap-3">
-                  <IconChip icon={Icon} color={category!.color} size="sm" />
-                  <div className="flex-1">
-                    <div className="mb-1 flex items-center justify-between text-sm">
-                      <span className="font-medium">{category!.name}</span>
-                      <span className="text-slate-500 dark:text-slate-400">{formatCurrency(total)}</span>
-                    </div>
-                    <div className="h-1.5 overflow-hidden rounded-full bg-slate-900/5 dark:bg-white/10">
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${(total / maxCategoryTotal) * 100}%`,
-                          background: category!.color,
-                        }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
+          <h2 className="mb-4 text-base font-semibold">Na co idzie kasa</h2>
+          <CategoryDonutChart data={categoryBreakdown} />
         </GlassCard>
 
         <GlassCard className="p-5">

@@ -1,5 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie'
-import type { Budget, Category, Idea, Task, Transaction } from '../types'
+import type { Budget, Category, Idea, ImportBatch, Task, Transaction } from '../types'
 
 const db = new Dexie('czas-i-wydatki') as Dexie & {
   categories: EntityTable<Category, 'id'>
@@ -7,6 +7,7 @@ const db = new Dexie('czas-i-wydatki') as Dexie & {
   budgets: EntityTable<Budget, 'id'>
   tasks: EntityTable<Task, 'id'>
   ideas: EntityTable<Idea, 'id'>
+  importBatches: EntityTable<ImportBatch, 'id'>
 }
 
 db.version(1).stores({
@@ -22,6 +23,15 @@ db.version(2).stores({
   budgets: '++id, categoryId',
   tasks: '++id, date, done',
   ideas: '++id, updatedAt',
+})
+
+db.version(3).stores({
+  categories: '++id, type',
+  transactions: '++id, categoryId, date, type, importBatchId',
+  budgets: '++id, categoryId',
+  tasks: '++id, date, done',
+  ideas: '++id, updatedAt',
+  importBatches: '++id, createdAt',
 })
 
 const defaultExpenseCategories: Omit<Category, 'id'>[] = [
